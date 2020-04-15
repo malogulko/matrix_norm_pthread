@@ -11,9 +11,8 @@
 struct rowSumPartitionReq {
     double *matrix_a;
     double *matrix_b;
-    double *row_sum_vector;
     double *inf_norm;
-    pthread_mutex_t *mutex_inf_norm;
+    double *row_sum_vector;
     int size;
     int partition_num; // partition number (0..1,2,n)
     int partition_rows; // number of rows in the partition
@@ -28,10 +27,11 @@ void row_sum(double *matrix_c, double *row_sum_vector, int size) {
     }
 }
 
-void *ijk_row_sum_partition(void *input) {
+void ijk_row_sum_partition(void *input) {
     struct rowSumPartitionReq *info = (struct rowSumPartitionReq *) input;
     int partition_start = info->partition_num * info->partition_rows;
     int next_partition_start = (info->partition_num + 1) * info->partition_rows;
+
     for (int i = partition_start; i < next_partition_start; i++) {
         double row_sum = 0;
         for (int j = 0; j < info->size; j++) {
@@ -40,13 +40,10 @@ void *ijk_row_sum_partition(void *input) {
             }
         }
         *(info->row_sum_vector + i) = row_sum;
-        pthread_mutex_lock(info->mutex_inf_norm);
-        if (row_sum > *info->inf_norm) {
+        if (*info->inf_norm < row_sum) {
             *info->inf_norm = row_sum;
         }
-        pthread_mutex_unlock(info->mutex_inf_norm);
     }
-    return NULL;
 }
 
 void ijk_row_sum_partitioned(double *matrix_a,
@@ -56,35 +53,20 @@ void ijk_row_sum_partitioned(double *matrix_a,
                              int matrix_size,
                              int num_partitions) {
     check_partition(matrix_size, num_partitions);
+    *inf_norm = 0;
     int partition_size = matrix_size / num_partitions;
-    pthread_t thread_ids[num_partitions];
-    struct rowSumPartitionReq *reqs = malloc(num_partitions * sizeof(*reqs));
-
-    pthread_mutex_t *mutex_inf_norm = malloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(mutex_inf_norm, NULL);
-
-    for (int p_num = 0; p_num < num_partitions; p_num++) {
+    for (int p_num = 0; p_num <= num_partitions; p_num++) {
         struct rowSumPartitionReq req = {
                 .matrix_a = matrix_a,
                 .matrix_b = matrix_b,
-                .row_sum_vector = row_sum_vector,
                 .inf_norm = inf_norm,
-                .mutex_inf_norm = mutex_inf_norm,
+                .row_sum_vector = row_sum_vector,
                 .size = matrix_size,
                 .partition_num = p_num,
                 .partition_rows = partition_size
         };
-        // To ensure malloc
-        *(reqs + sizeof(*reqs) * p_num) = req;
-        pthread_create(&thread_ids[p_num], NULL, ijk_row_sum_partition, (reqs + sizeof(*reqs) * p_num));
+        ijk_row_sum_partition(&req);
     }
-
-    // Blocking until join is finished
-    for (int tn = 0; tn < num_partitions; tn++) {
-        (void) pthread_join(thread_ids[tn], 0);
-    }
-    pthread_mutex_destroy(mutex_inf_norm);
-    free(mutex_inf_norm);
 }
 
 
@@ -128,9 +110,7 @@ int main(int argc, char *argv[]) {
     parse_args(argc, argv, &size, &num_partitions);
     double *matrix_a = matrix_malloc(size);
     double *matrix_b = matrix_malloc(size);
-    // Initializing the norm
     double *inf_norm = malloc(sizeof(double));
-    *inf_norm = 0;
     // Initialize info objs
     struct matrixInfo matrix_a_info = {.size = size, .mxPtr = matrix_a};
     struct matrixInfo matrix_b_info = {.size = size, .mxPtr = matrix_b};
@@ -140,7 +120,7 @@ int main(int argc, char *argv[]) {
 
     double *matrix_c = matrix_malloc(size); // result matrix
     double *row_sum_vector = vector_malloc(size); // result vector with max
-    //double *row_sum_vector_backup = vector_malloc(size); // result vector with max
+    double *row_sum_vector_backup = vector_malloc(size); // result vector with max
 
     // Blocking until join is finished
     for (int tn = 0; tn < 2; tn++) {
@@ -149,18 +129,19 @@ int main(int argc, char *argv[]) {
 
     //*** Commenting out the prints ***/
 
-    //printf("Matrix A stripe:\n");
-    //for (int s = 0; s < size * size; s++) {
-    //    printf("%f ", *(matrix_a + s));
-    //}
-    //printf("\nMatrix A:\n");
-    //print_matrix_row_wise(matrix_a, size);
-    //printf("Matrix B stripe:\n");
-    //for (int s = 0; s < size * size; s++) {
-    //    printf("%f ", *(matrix_b + s));
-    //}
-    //printf("\nMatrix B:\n");
-    //print_matrix_col_wise(matrix_b, size);
+    // printf("Matrix A stripe:\n");
+    // for (int s = 0; s < size * size; s++) {
+    //     printf("%f ", *(matrix_a + s));
+    // }
+    // printf("\nMatrix A:\n");
+    // print_matrix_row_wise(matrix_a, size);
+
+    // printf("Matrix B stripe:\n");
+    // for (int s = 0; s < size * size; s++) {
+    //     printf("%f ", *(matrix_b + s));
+    // }
+    // printf("\nMatrix B:\n");
+    // print_matrix_col_wise(matrix_b, size);
 
     clock_gettime(CLOCK_MONOTONIC_RAW, &start);
     ijk_row_sum_partitioned(matrix_a, matrix_b, row_sum_vector, inf_norm, size, num_partitions);
@@ -179,7 +160,7 @@ int main(int argc, char *argv[]) {
 
     //printf("Matrix C row SUM:\n");
     //print_vector(row_sum_vector, size);
-    //printf("Matrix C infinity norm: %f\n", *inf_norm);
+    //printf("Infinity norm is %f\n", *inf_norm);
 
     //printf("Matrix C row SUM BACKUP:\n");
     //print_vector(row_sum_vector_backup, size);
