@@ -26,11 +26,11 @@ void row_sum(double *matrix_c, double *row_sum_vector, int size) {
     }
 }
 
-void ijk_row_sum_partition(void *input) {
+void *ijk_row_sum_partition(void *input) {
     struct rowSumPartitionReq *info = (struct rowSumPartitionReq *) input;
     int partition_start = info->partition_num * info->partition_rows;
     int next_partition_start = (info->partition_num + 1) * info->partition_rows;
-
+    printf("Calculating partition from %d to %d\n", partition_start, next_partition_start);
     for (int i = partition_start; i < next_partition_start; i++) {
         double *c_sum = info->row_sum_vector + i;
         for (int j = 0; j < info->size; j++) {
@@ -39,6 +39,7 @@ void ijk_row_sum_partition(void *input) {
             }
         }
     }
+    return NULL;
 }
 
 void ijk_row_sum_partitioned(double *matrix_a,
@@ -48,7 +49,10 @@ void ijk_row_sum_partitioned(double *matrix_a,
                              int num_partitions) {
     check_partition(matrix_size, num_partitions);
     int partition_size = matrix_size / num_partitions;
-    for (int p_num = 0; p_num <= num_partitions; p_num++) {
+    pthread_t thread_ids[num_partitions];
+    struct rowSumPartitionReq *reqs = malloc(num_partitions * sizeof(*reqs));
+
+    for (int p_num = 0; p_num < num_partitions; p_num++) {
         struct rowSumPartitionReq req = {
                 .matrix_a = matrix_a,
                 .matrix_b = matrix_b,
@@ -57,8 +61,16 @@ void ijk_row_sum_partitioned(double *matrix_a,
                 .partition_num = p_num,
                 .partition_rows = partition_size
         };
-        ijk_row_sum_partition(&req);
+        // To ensure malloc
+        *(reqs + sizeof(*reqs) * p_num) = req;
+        pthread_create(&thread_ids[p_num], NULL, ijk_row_sum_partition, (reqs + sizeof(*reqs) * p_num));
     }
+
+    // Blocking until join is finished
+    for (int tn = 0; tn < num_partitions; tn++) {
+        (void) pthread_join(thread_ids[tn], 0);
+    }
+
 }
 
 
