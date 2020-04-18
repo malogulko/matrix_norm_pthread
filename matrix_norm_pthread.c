@@ -32,6 +32,7 @@ void *ijk_row_sum_partition(void *input) {
     struct rowSumPartitionReq *info = (struct rowSumPartitionReq *) input;
     int partition_start = info->partition_num * info->partition_rows;
     int next_partition_start = (info->partition_num + 1) * info->partition_rows;
+    double local_max_sum = 0;
     for (int i = partition_start; i < next_partition_start; i++) {
         double row_sum = 0;
         for (int j = 0; j < info->size; j++) {
@@ -40,12 +41,15 @@ void *ijk_row_sum_partition(void *input) {
             }
         }
         *(info->row_sum_vector + i) = row_sum;
-        pthread_mutex_lock(info->mutex_inf_norm);
-        if (row_sum > *info->inf_norm) {
-            *info->inf_norm = row_sum;
+        if (local_max_sum < row_sum) {
+            local_max_sum = row_sum;
         }
-        pthread_mutex_unlock(info->mutex_inf_norm);
     }
+    pthread_mutex_lock(info->mutex_inf_norm);
+    if (local_max_sum > *info->inf_norm) {
+        *info->inf_norm = local_max_sum;
+    }
+    pthread_mutex_unlock(info->mutex_inf_norm);
     return NULL;
 }
 
